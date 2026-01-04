@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Container,
@@ -28,6 +28,7 @@ const DIRECTIONS = [
 
 const getPlayerName = (player) => (player === PLAYERS.BLACK ? '黒' : '白');
 
+// ボードの初期化
 const initializeBoard = () => {
   const board = Array(SIZE).fill(null).map(() => Array(SIZE).fill(PLAYERS.NONE));
   board[3][3] = PLAYERS.WHITE;
@@ -37,56 +38,75 @@ const initializeBoard = () => {
   return board;
 };
 
-const OthelloGame = () => {
+// 指定した位置に石を置いた場合に返せる石のリストを取得（純粋関数）
+const getFlippableDiscs = (row, col, player, currentBoard) => {
+  if (currentBoard[row][col] !== PLAYERS.NONE) {
+    return [];
+  }
+
+  const opponent = player === PLAYERS.BLACK ? PLAYERS.WHITE : PLAYERS.BLACK;
+  const allFlippableDiscs = [];
+
+  for (const [dr, dc] of DIRECTIONS) {
+    let r = row + dr;
+    let c = col + dc;
+    const discsInDirection = [];
+
+    while (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
+      if (currentBoard[r][c] === opponent) {
+        discsInDirection.push([r, c]);
+      } else if (currentBoard[r][c] === player) {
+        allFlippableDiscs.push(...discsInDirection);
+        break;
+      } else { // Empty cell
+        break;
+      }
+      r += dr;
+      c += dc;
+    }
+  }
+  return allFlippableDiscs;
+};
+
+// 石を置けるか判定
+const isValidMove = (row, col, player, currentBoard) => {
+  return getFlippableDiscs(row, col, player, currentBoard).length > 0;
+};
+
+// プレイヤーがどこかに置ける場所があるか判定
+const canPlay = (player, currentBoard) => {
+  for (let i = 0; i < SIZE; i++) {
+    for (let j = 0; j < SIZE; j++) {
+      if (isValidMove(i, j, player, currentBoard)) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+// スコア計算
+const calculateScores = (currentBoard) => {
+  let black = 0;
+  let white = 0;
+  for (let i = 0; i < SIZE; i++) {
+    for (let j = 0; j < SIZE; j++) {
+      if (currentBoard[i][j] === PLAYERS.BLACK) black++;
+      if (currentBoard[i][j] === PLAYERS.WHITE) white++;
+    }
+  }
+  return { black, white };
+};
+
+// ゲームロジックを管理するカスタムフック
+const useOthelloGame = () => {
   const [board, setBoard] = useState(initializeBoard);
   const [currentPlayer, setCurrentPlayer] = useState(PLAYERS.BLACK);
   const [gameOver, setGameOver] = useState(false);
-  const [scores, setScores] = useState({ black: 0, white: 0 });
   const [passInfo, setPassInfo] = useState({ open: false, message: '' });
 
-  const getFlippableDiscs = useCallback((row, col, player, currentBoard) => {
-    if (currentBoard[row][col] !== PLAYERS.NONE) {
-      return [];
-    }
-
-    const opponent = player === PLAYERS.BLACK ? PLAYERS.WHITE : PLAYERS.BLACK;
-    const allFlippableDiscs = [];
-
-    for (const [dr, dc] of DIRECTIONS) {
-      let r = row + dr;
-      let c = col + dc;
-      const discsInDirection = [];
-
-      while (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
-        if (currentBoard[r][c] === opponent) {
-          discsInDirection.push([r, c]);
-        } else if (currentBoard[r][c] === player) {
-          allFlippableDiscs.push(...discsInDirection);
-          break;
-        } else { // Empty cell
-          break;
-        }
-        r += dr;
-        c += dc;
-      }
-    }
-    return allFlippableDiscs;
-  }, []);
-
-  const isValidMove = useCallback((row, col, player, currentBoard) => {
-    return getFlippableDiscs(row, col, player, currentBoard).length > 0;
-  }, [getFlippableDiscs]);
-
-  const canPlay = useCallback((player, currentBoard) => {
-    for (let i = 0; i < SIZE; i++) {
-      for (let j = 0; j < SIZE; j++) {
-        if (isValidMove(i, j, player, currentBoard)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }, [isValidMove]);
+  // スコアはボードの状態から算出する（派生ステート）
+  const scores = useMemo(() => calculateScores(board), [board]);
 
   const handleCellClick = (row, col) => {
     if (gameOver || !isValidMove(row, col, currentPlayer, board)) {
@@ -105,18 +125,6 @@ const OthelloGame = () => {
     setCurrentPlayer(currentPlayer === PLAYERS.BLACK ? PLAYERS.WHITE : PLAYERS.BLACK);
   };
 
-  const calculateScores = useCallback((currentBoard) => {
-    let black = 0;
-    let white = 0;
-    for (let i = 0; i < SIZE; i++) {
-      for (let j = 0; j < SIZE; j++) {
-        if (currentBoard[i][j] === PLAYERS.BLACK) black++;
-        if (currentBoard[i][j] === PLAYERS.WHITE) white++;
-      }
-    }
-    return { black, white };
-  }, []);
-
   useEffect(() => {
     if (gameOver) return;
 
@@ -125,7 +133,6 @@ const OthelloGame = () => {
     if (!canPlay(currentPlayer, board)) {
       if (!canPlay(opponent, board)) {
         // Game Over
-        setScores(calculateScores(board));
         setGameOver(true);
       } else {
         // Pass
@@ -133,14 +140,38 @@ const OthelloGame = () => {
         setCurrentPlayer(opponent);
       }
     }
-  }, [board, currentPlayer, gameOver, canPlay, calculateScores]);
+  }, [board, currentPlayer, gameOver]);
 
   const handleReset = () => {
     setBoard(initializeBoard());
     setCurrentPlayer(PLAYERS.BLACK);
     setGameOver(false);
-    setScores({ black: 0, white: 0 });
+    setPassInfo({ open: false, message: '' });
   };
+
+  return {
+    board,
+    currentPlayer,
+    gameOver,
+    scores,
+    passInfo,
+    setPassInfo,
+    handleCellClick,
+    handleReset,
+  };
+};
+
+const OthelloGame = () => {
+  const {
+    board,
+    currentPlayer,
+    gameOver,
+    scores,
+    passInfo,
+    setPassInfo,
+    handleCellClick,
+    handleReset,
+  } = useOthelloGame();
 
   const getResultMessage = () => {
     if (scores.black > scores.white) return `黒の勝ちです！`;
@@ -182,9 +213,9 @@ const OthelloGame = () => {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                cursor: isValidMove(i, j, currentPlayer, board) ? 'pointer' : 'default',
+                cursor: !gameOver && isValidMove(i, j, currentPlayer, board) ? 'pointer' : 'default',
                 '&:hover': {
-                  backgroundColor: isValidMove(i, j, currentPlayer, board) ? 'lightgreen' : 'transparent',
+                  backgroundColor: !gameOver && isValidMove(i, j, currentPlayer, board) ? 'lightgreen' : 'transparent',
                 },
               }}
             >
@@ -205,7 +236,7 @@ const OthelloGame = () => {
 
       <Box sx={{ mt: 2 }}>
         <Typography variant="h6">
-          黒: {calculateScores(board).black} - 白: {calculateScores(board).white}
+          黒: {scores.black} - 白: {scores.white}
         </Typography>
       </Box>
 
